@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+
+# local-machine TLS-inspection CA certs - never commit real certs
+*/certs/*
+!*/certs/.gitkeep
+
+# generated test credentials - not secret in the "protects real data" sense,
+# but no reason to commit them either; deploy.sh regenerates/reuses locally
+deploy/.credentials/
+
+# editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
