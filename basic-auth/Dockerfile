@@ -2,6 +2,12 @@
 FROM python:3.12-slim
 WORKDIR /app
 
+# Patch OS-level packages to whatever's currently latest within this Debian
+# release -- the base image itself is a point-in-time snapshot and
+# accumulates known CVEs in glibc/openssl/etc. between snapshots even
+# though nothing in this Dockerfile touches them directly.
+RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # --- Norton MITM cert trust (local builds only; no-op in Cloud Build) ---
 # See the sibling mcp-fileserver repo's Dockerfile for the full explanation.
 COPY certs/ /tmp/extra-certs/
