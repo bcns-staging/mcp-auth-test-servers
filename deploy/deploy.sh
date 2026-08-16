@@ -25,11 +25,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRED_DIR="${REPO_ROOT}/deploy/.credentials"
 mkdir -p "$CRED_DIR"
 
-echo "== 1/6: enabling required APIs =="
+COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+echo "== 1/7: enabling required APIs =="
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com \
   --project="$PROJECT_ID"
 
-echo "== 2/6: Artifact Registry repo (shared by all 4 images) =="
+echo "== 2/7: Artifact Registry repo (shared by all 4 images) =="
 if ! gcloud artifacts repositories describe "$AR_REPO" --location="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
   gcloud artifacts repositories create "$AR_REPO" \
     --repository-format=docker --location="$REGION" --project="$PROJECT_ID" \
@@ -37,6 +39,17 @@ if ! gcloud artifacts repositories describe "$AR_REPO" --location="$REGION" --pr
 else
   echo "Artifact Registry repo already exists, skipping"
 fi
+
+echo "== 3/7: grant the default Compute SA push access to this Artifact Registry repo =="
+# gcloud builds submit runs as the default Compute Engine SA in this
+# project, and Artifact Registry push access is granted per-repo -- the
+# equivalent grant on mcp-fileserver's own AR repo doesn't carry over to
+# this new one. Project-level grants (Cloud Build's source-staging bucket
+# read, logging.logWriter) mcp-fileserver's deploy.sh already set up DO
+# carry over, since those aren't scoped to a specific repo.
+gcloud artifacts repositories add-iam-policy-binding "$AR_REPO" \
+  --location="$REGION" --project="$PROJECT_ID" \
+  --member="serviceAccount:${COMPUTE_SA}" --role="roles/artifactregistry.writer"
 
 # generate_if_missing NAME VAR1 [VAR2 ...]: writes deploy/.credentials/NAME
 # with each VAR set to a fresh random value, unless that file already
@@ -56,7 +69,7 @@ generate_if_missing() {
   fi
 }
 
-echo "== 3/6: generating test credentials (only once; re-run keeps existing ones) =="
+echo "== 4/7: generating test credentials (only once; re-run keeps existing ones) =="
 generate_if_missing basic-auth TEST_USERNAME TEST_PASSWORD
 generate_if_missing username-password TEST_USERNAME TEST_PASSWORD
 generate_if_missing api-key TEST_API_KEY
@@ -75,12 +88,12 @@ API_KEY_VALUE="$TEST_API_KEY"
 source "${CRED_DIR}/oauth2"
 OAUTH2_CLIENT_ID="$TEST_CLIENT_ID"; OAUTH2_CLIENT_SECRET="$TEST_CLIENT_SECRET"
 
-echo "== 4/6: build + push all 4 images via Cloud Build =="
+echo "== 5/7: build + push all 4 images via Cloud Build =="
 gcloud builds submit --project="$PROJECT_ID" --tag="${IMAGE_BASE}/basic-auth-server:${TAG}" "${REPO_ROOT}/basic-auth"
 gcloud builds submit --project="$PROJECT_ID" --tag="${IMAGE_BASE}/api-key-server:${TAG}" "${REPO_ROOT}/api-key"
 gcloud builds submit --project="$PROJECT_ID" --tag="${IMAGE_BASE}/oauth2-server:${TAG}" "${REPO_ROOT}/oauth2"
 
-echo "== 5/6: deploy to Cloud Run =="
+echo "== 6/7: deploy to Cloud Run =="
 # --allow-unauthenticated on all four: Cloud Run's own IAM layer stays open,
 # same as mcp-fileserver -- the actual auth enforcement is each app's own
 # middleware, which is the entire thing being tested here.
@@ -118,7 +131,7 @@ gcloud run deploy mcp-test-oauth2 \
   --set-env-vars="TEST_CLIENT_ID=${OAUTH2_CLIENT_ID},TEST_CLIENT_SECRET=${OAUTH2_CLIENT_SECRET}" \
   --quiet
 
-echo "== 6/6: done -- service URLs and test credentials below =="
+echo "== 7/7: done -- service URLs and test credentials below =="
 echo ""
 
 BASIC_AUTH_URL="$(gcloud run services describe mcp-test-basic-auth --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')"
